@@ -62,3 +62,12 @@ __pycache__/
 venv/
 env/
 .DS_Store
+
+# --- our pipeline ---
+external/*
+!external/README.md
+cache/
+outputs/
+*.npz
+*.pt
+*.ckpt
