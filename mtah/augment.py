@@ -16,6 +16,7 @@ possession from geometry, not from which side is which.
 from dataclasses import asdict, dataclass, replace
 
 import numpy as np
+from numba import njit
 
 from .common import A, H
 
@@ -30,6 +31,10 @@ class CorruptCfg:
     player_missing: float = 0.07    # ~20.5 of 22 tracked during play
     player_burst: float = 50.0
     player_jitter: float = 0.15
+    ball_far_boost: float = 1.0     # drop hazard x this when no player within 4 m (ball in flight)
+    ball_out_boost: float = 1.0     # drop hazard x this when the ball is outside the pitch
+    fov_missing: float = 0.0        # fraction of frames where one end of the pitch is out of view
+    fov_burst: float = 150.0        # mean length of such a stretch, frames
     false_ball: float = 0.0         # fraction of frames with a false ball on a random player
     fragment: bool = False          # cut tracks into tracklets packed into reused slots
     flip: bool = True
@@ -40,26 +45,38 @@ class CorruptCfg:
         return asdict(self)
 
 
+@njit(cache=True)
+def _markov(u, state, p_up, hazard):
+    T, n = u.shape
+    out = np.empty((T, n), dtype=np.bool_)
+    for t in range(T):
+        for j in range(n):
+            if state[j]:
+                state[j] = u[t, j] >= p_up
+            else:
+                state[j] = u[t, j] < hazard[t, j]
+            out[t, j] = state[j]
+    return out
+
+
 def markov_missing(rng, T, n, missing, burst, boost=None):
     """(T, n) bool, True = missing. Two-state Markov chain per column with bursty dropouts.
 
     `boost` (T, n) multiplies the drop hazard frame by frame (e.g. crowded ball, ball in the air).
+    Draws exactly the same random numbers as the original pure-Python loop (u, then the initial
+    state), so fixed-seed validation sets are unchanged.
     """
     if missing <= 0:
         return np.zeros((T, n), dtype=bool)
     p_up = 1.0 / max(burst, 1.0)
     p_down = min(0.99, missing / max(1e-6, 1.0 - missing) * p_up)
     u = rng.random((T, n))
-    out = np.empty((T, n), dtype=bool)
     state = rng.random(n) < missing
-    for t in range(T):
-        hazard = p_down if boost is None else np.minimum(0.99, p_down * boost[t])
-        state = np.where(state, u[t] >= p_up, u[t] < hazard)
-        out[t] = state
-    return out
+    hazard = np.full((T, n), p_down) if boost is None else         np.ascontiguousarray(np.broadcast_to(np.minimum(0.99, p_down * boost), (T, n)), dtype=np.float64)
+    return _markov(u, state.copy(), p_up, hazard)
 
 
-def randomized(cfg, rng):
+def randomized_v1(cfg, rng):
     """Domain randomisation: a fresh corruption level per sample, wide enough to cover whatever the
     real ATD turns out to be (stress test: the net was weakest on false balls and noisy players)."""
     return replace(
@@ -69,6 +86,27 @@ def randomized(cfg, rng):
         player_missing=rng.uniform(0.03, 0.20), player_burst=rng.uniform(30, 120),
         player_jitter=rng.uniform(0.1, 0.6),
         false_ball=rng.uniform(0.0, 0.06) if rng.random() < 0.5 else 0.0,
+        fragment=bool(rng.random() < 0.5))
+
+
+def randomized(cfg, rng):
+    """Domain randomisation v2, centred on what mtah.noise_stats measured on the real ATD:
+    ball gaps of ~10-30 s (not 1 s), ball lost more when far from players, whole ends of the pitch
+    out of view at times, very few false balls, smoother ball positions. Short-gap regimes are
+    kept in the mix so nothing learned in v1 is unlearned."""
+    long_gaps = rng.random() < 0.7
+    return replace(
+        cfg,
+        ball_missing=rng.uniform(0.18, 0.55),
+        ball_burst=float(np.exp(rng.uniform(np.log(150), np.log(900)))) if long_gaps
+        else rng.uniform(20, 100),
+        ball_crowd_boost=rng.uniform(0.5, 2.0), ball_far_boost=rng.uniform(1.0, 3.0),
+        ball_out_boost=rng.uniform(1.0, 10.0),
+        ball_jitter=rng.uniform(0.05, 0.5),
+        player_missing=rng.uniform(0.03, 0.15), player_burst=rng.uniform(30, 300),
+        player_jitter=rng.uniform(0.1, 0.4),
+        fov_missing=rng.uniform(0.0, 0.15), fov_burst=rng.uniform(50, 300),
+        false_ball=rng.uniform(0.0, 0.02) if rng.random() < 0.25 else 0.0,
         fragment=bool(rng.random() < 0.5))
 
 
@@ -141,7 +179,10 @@ def corrupt(players_xy, team, ball_xy, label=None, rng=None, cfg=CorruptCfg(), b
     # ball: drop hazard rises when crowded or airborne
     d = np.linalg.norm(players_xy - ball_xy[:, None], axis=2)
     crowd = (np.nan_to_num(d, nan=1e9) < 3.0).sum(axis=1) >= 3
-    boost = np.where(crowd, cfg.ball_crowd_boost, 1.0)
+    far = np.nan_to_num(d, nan=1e9).min(axis=1) > 4.0
+    out = (np.abs(np.nan_to_num(ball_xy[:, 0])) > 52.5) | (np.abs(np.nan_to_num(ball_xy[:, 1])) > 34.0)
+    boost = (np.where(crowd, cfg.ball_crowd_boost, 1.0) * np.where(far, cfg.ball_far_boost, 1.0)
+             * np.where(out, cfg.ball_out_boost, 1.0))
     if ball_z is not None:
         boost = boost * np.where(np.nan_to_num(ball_z.reshape(-1)) > 2.0, cfg.ball_air_boost, 1.0)
     gone = markov_missing(rng, T, 1, cfg.ball_missing, cfg.ball_burst, boost[:, None])[:, 0]
@@ -152,6 +193,14 @@ def corrupt(players_xy, team, ball_xy, label=None, rng=None, cfg=CorruptCfg(), b
     pgone = markov_missing(rng, T, S, cfg.player_missing, cfg.player_burst)
     players_xy += rng.normal(0, cfg.player_jitter, players_xy.shape).astype(np.float32)
     players_xy[pgone] = np.nan
+
+    if cfg.fov_missing > 0:   # the camera does not see one end: everyone beyond a line vanishes
+        off = markov_missing(rng, T, 1, cfg.fov_missing, cfg.fov_burst)[:, 0]
+        edges = np.flatnonzero(np.diff(np.concatenate(([0], off.astype(np.int8), [0]))))
+        for a, b in zip(edges[::2], edges[1::2]):
+            side, cut = rng.choice([-1.0, 1.0]), rng.uniform(10, 40)
+            hide = side * players_xy[a:b, :, 0] > cut
+            players_xy[a:b][hide] = np.nan
 
     if cfg.false_ball > 0:
         ball_xy = add_false_ball(ball_xy, players_xy, rng, cfg.false_ball)

@@ -35,12 +35,12 @@ def model_probs(model_dir, m, refresh=False):
     t0 = time.time()
     if os.path.isfile(os.path.join(model_dir, "best.pt")):
         import torch
-        from .infer import load_model, predict_match
+        from .infer import load_model, predict_match, window_of
         torch.manual_seed(0)
         torch.set_num_threads(4)
         torch.use_deterministic_algorithms(True)
-        net, _ = load_model(os.path.join(model_dir, "best.pt"))
-        probs = predict_match(net, m.players_xy, m.team, m.ball_xy, m.runs(), m.fps)
+        net, ck = load_model(os.path.join(model_dir, "best.pt"))
+        probs = predict_match(net, m.players_xy, m.team, m.ball_xy, m.runs(), m.fps, **window_of(ck))
     elif os.path.isfile(os.path.join(model_dir, "model.pkl")):
         import pickle
         from .gbdt import predict_probs

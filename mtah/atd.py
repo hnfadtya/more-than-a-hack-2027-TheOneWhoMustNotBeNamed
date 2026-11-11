@@ -133,9 +133,9 @@ def summary(m):
             col = m.ball_extra[ball_seen, j]
             col = col[~np.isnan(col)]
             if len(col):
-                uniq = np.unique(col)
-                print(f"  ball extra field {j}: n={len(col)} unique={len(uniq)} "
-                      f"min={col.min():.3g} max={col.max():.3g} sample={uniq[:6]}")
+                # aggregates only: no raw values leave the machine
+                print(f"  ball extra field {j}: n={len(col)} unique={len(np.unique(col))} "
+                      f"min={col.min():.3g} max={col.max():.3g}")
 
 
 if __name__ == "__main__":

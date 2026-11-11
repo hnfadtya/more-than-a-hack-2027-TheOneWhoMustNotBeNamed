@@ -30,6 +30,12 @@ def load_model(path, device="cpu"):
     return model, ck
 
 
+def window_of(ck):
+    """Inference window = the training window (a 60 s model must see 60 s at inference too)."""
+    L = int(ck.get("args", {}).get("L", 750))
+    return dict(L=L, hop=L // 2)
+
+
 @torch.no_grad()
 def predict_block(model, players, pmask, ball, L=750, hop=375, device="cpu", batch=16):
     """Probabilities (T,3) for one contiguous block, sliding overlapping windows.
@@ -87,7 +93,7 @@ def main():
     m = atd.load()
     model, ck = load_model(args.ckpt)
     runs = m.runs()
-    probs = predict_match(model, m.players_xy, m.team, m.ball_xy, runs, m.fps)
+    probs = predict_match(model, m.players_xy, m.team, m.ball_xy, runs, m.fps, **window_of(ck))
     out = args.out or os.path.join(os.path.dirname(args.ckpt), f"{m.name}_probs.npz")
     np.savez_compressed(out, probs=probs)
     print("wrote", os.path.relpath(out, ROOT))

@@ -31,6 +31,11 @@ SCENARIOS = {
     "fragment": dict(fragment=True),
     "harsh": dict(cfg=dict(ball_missing=0.55, ball_burst=80.0, player_missing=0.15,
                            player_burst=100.0, player_jitter=0.5), false_ball=0.04, fragment=True),
+    # matched to mtah.noise_stats on the real ATD: long ball gaps, ball lost when far from players,
+    # ends of the pitch out of view
+    "long_gaps": dict(cfg=dict(ball_burst=430.0)),
+    "atd_like": dict(cfg=dict(ball_missing=0.22, ball_burst=430.0, ball_far_boost=2.0, ball_out_boost=8.0, ball_jitter=0.1,
+                              fov_missing=0.08, fov_burst=150.0), fragment=True),
 }
 
 
@@ -48,10 +53,10 @@ def scenario_inputs(m, k, spec, seed=4321):
 def model_probs(model_dir, m, pxy, team, bxy):
     if os.path.isfile(os.path.join(model_dir, "best.pt")):
         import torch
-        from .infer import load_model, predict_match
+        from .infer import load_model, predict_match, window_of
         torch.set_num_threads(os.cpu_count() or 4)
-        net, _ = load_model(os.path.join(model_dir, "best.pt"))
-        return predict_match(net, pxy, team, bxy, m.runs(), m.fps)
+        net, ck = load_model(os.path.join(model_dir, "best.pt"))
+        return predict_match(net, pxy, team, bxy, m.runs(), m.fps, **window_of(ck))
     import pickle
     from .gbdt import predict_probs
     from .handfeat import match_features
