@@ -16,12 +16,10 @@ import numpy as np
 import torch
 
 from .common import ROOT, X
-from .decode import decode_runs
+from .decode import DEFAULT_DECODE, PROB_DECIMALS, probs_to_codes  # noqa: F401 (re-exported)
 from .features import featurize
 from .model import PossessionNet
 
-PROB_DECIMALS = 4
-DEFAULT_DECODE = dict(min_dur=(12, 12, 25), switch=3.0)
 
 
 def load_model(path, device="cpu"):
@@ -70,13 +68,6 @@ def predict_match(model, players_xy, team, ball_xy, runs, fps=25, device="cpu", 
     for a, b in runs:
         players, pmask, ball = featurize(players_xy[a:b], team, ball_xy[a:b], fps)
         out[a:b] = predict_block(model, players, pmask, ball, device=device, **kw)
-    return out
-
-
-def probs_to_codes(probs, runs, min_dur, switch):
-    p = np.round(np.nan_to_num(probs, nan=1 / 3), PROB_DECIMALS)
-    logp = np.log(np.clip(p, 1e-4, 1.0))
-    out = decode_runs(logp, runs, min_dur, switch)
     return out
 
 

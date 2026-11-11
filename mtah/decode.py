@@ -141,3 +141,22 @@ def votes_to_logp(codes, n_classes=N_LAB, eps=0.05):
     logp[known] = np.log(eps / (n_classes - 1))
     logp[np.flatnonzero(known), codes[known].astype(np.int64)] = np.log(1 - eps)
     return logp
+
+
+PROB_DECIMALS = 4
+# Chosen by mtah.tune_decoder on IDSSE validation (GBDT v1 probs), from the middle of a flat plateau
+# (min team spell 50-75 frames, team switch cost 8-12 all within 0.005 spellF1), not its argmax.
+# Team switches are expensive (a turnover needs sustained evidence); dead-ball switches are cheap.
+DEFAULT_DECODE = dict(min_dur=(50, 50, 100),
+                      switch=((0.0, 8.0, 2.0), (8.0, 0.0, 2.0), (2.0, 2.0, 0.0)))
+
+
+def probs_to_codes(probs, runs, min_dur, switch):
+    """Per-frame H/A/D probabilities (T,3) -> decoded codes, X outside runs.
+
+    Rounded first, so last-bit float differences between machines cannot flip a decision; NaN rows
+    (no prediction) become uniform, i.e. no opinion.
+    """
+    p = np.round(np.nan_to_num(np.asarray(probs, dtype=np.float64), nan=1 / 3), PROB_DECIMALS)
+    logp = np.log(np.clip(p, 1e-4, 1.0))
+    return decode_runs(logp, runs, min_dur, switch)
