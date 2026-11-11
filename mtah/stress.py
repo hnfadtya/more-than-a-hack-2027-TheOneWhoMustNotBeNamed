@@ -6,9 +6,15 @@ false ball detections, fragmented tracks with slot reuse, tracklets on the wrong
 The ATD has all of these to some degree; a model whose score collapses under them is a risk.
 
     python -m mtah.stress --models outputs/nn/run1 outputs/gbdt/v1
+    python -m mtah.stress --models outputs/nn/run2 outputs/nn/run2+outputs/nn/run3   # ensemble
+
+A model spec "dirA+dirB" averages the models' probabilities (equal weights) and decodes with dirA's
+decoder.json. Per-model probabilities are cached in outputs/stress_cache/, keyed by the scenario
+spec, so comparing ensembles does not recompute them.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import time
@@ -66,6 +72,30 @@ def model_probs(model_dir, m, pxy, team, bxy):
     return predict_probs(gbdt, X, rows, m.n_frames)
 
 
+CACHE = "outputs/stress_cache"
+
+
+def cached_probs(model_dir, scenario, m, inp, seed=4321):
+    """model_probs with a disk cache keyed by model, scenario spec, seed and match."""
+    key = json.dumps([SCENARIOS[scenario], seed, BASE.__dict__], sort_keys=True, default=str)
+    tag = hashlib.sha1(key.encode()).hexdigest()[:10]
+    path = os.path.join(CACHE, model_dir.replace("/", "_").replace("\\", "_"),
+                        f"{scenario}_{tag}_{m.name}.npz")
+    ckpt = [os.path.join(model_dir, f) for f in ("best.pt", "model.pkl")
+            if os.path.isfile(os.path.join(model_dir, f))][0]
+    if os.path.isfile(path) and os.path.getmtime(path) > os.path.getmtime(ckpt):
+        return np.load(path)["probs"]
+    probs = model_probs(model_dir, m, *inp)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    np.savez_compressed(path, probs=probs)
+    return probs
+
+
+def spec_probs(spec, scenario, m, inp):
+    dirs = spec.split("+")
+    return sum(cached_probs(d, scenario, m, inp).astype(np.float64) for d in dirs) / len(dirs)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--models", nargs="+", required=True)
@@ -75,7 +105,7 @@ def main():
     args = ap.parse_args()
 
     ms = [m for m in load_matches("cache/idsse_*.npz", 25) if m.name in args.val]
-    decoders = {d: load_decoder(os.path.join(d, "decoder.json")) for d in args.models}
+    decoders = {d: load_decoder(os.path.join(d.split("+")[0], "decoder.json")) for d in args.models}
     table = {}
     for name in args.scenarios:
         spec = SCENARIOS[name]
@@ -86,17 +116,20 @@ def main():
         for d in args.models:
             t0 = time.time()
             spells, poss = [], []
-            for m, (pxy, team, bxy) in zip(ms, inputs):
-                codes = probs_to_codes(model_probs(d, m, pxy, team, bxy), m.runs(), **decoders[d])
+            for m, inp in zip(ms, inputs):
+                codes = probs_to_codes(spec_probs(d, name, m, inp), m.runs(), **decoders[d])
                 r = score(m.gt_codes(), codes)
                 spells.append(r["spell_f1_mean"])
                 poss.append(f"{r['n_pred_spells']}/{r['n_gt_spells']}")
             table[name][d] = float(np.mean(spells))
             print(f"{name:<14} {d:<20} spellF1 {np.mean(spells):.4f}  poss {' '.join(poss)}  "
                   f"(slots {n_slots}, ball seen {ball_seen:.0%}, {time.time() - t0:.0f}s)", flush=True)
-    print("\nscenario       " + "  ".join(f"{d:>20}" for d in args.models))
+    w = max(20, *(len(d) for d in args.models))
+    print("\nscenario       " + "  ".join(f"{d:>{w}}" for d in args.models))
     for name, row in table.items():
-        print(f"{name:<14} " + "  ".join(f"{row[d]:>20.4f}" for d in args.models))
+        print(f"{name:<14} " + "  ".join(f"{row[d]:>{w}.4f}" for d in args.models))
+    print(f"{'mean':<14} " + "  ".join(
+        f"{np.mean([table[n][d] for n in table]):>{w}.4f}" for d in args.models))
     with open(args.out, "w") as fh:
         json.dump(table, fh, indent=1)
 

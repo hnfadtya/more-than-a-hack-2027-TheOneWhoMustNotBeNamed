@@ -111,10 +111,31 @@ Competition data expected by ~12 Nov.
   far/out-of-pitch boosts, field-of-view dropout, fewer false balls, smoother ball.
   `markov_missing` compiled with numba (bit-identical output, verified).
 
+- Colab run3 = randomisation v2 + 60 s windows (`--domain_rand --L 1500 --steps 300`),
+  30 epochs x 69 s. Best val 0.7185 (epoch 23, default decoder); tuned decoder plateau ~0.72,
+  chose the run2 config min (25, 25, 50), team 8, dead 2 -> 0.7208.
+- Stress run2 -> run3: base 0.750 -> 0.727, ball_heavy 0.701 -> 0.699, players_heavy 0.738 -> 0.706,
+  false_ball 0.730 -> 0.706, fragment 0.753 -> 0.723, harsh 0.677 -> 0.631,
+  **long_gaps 0.678 -> 0.711, atd_like 0.663 -> 0.684**; mean 0.711 -> 0.698.
+  -> Rule (atd_like up, base drop < 0.03, mean not down) FAILS on the mean. **run2 stays primary.**
+  run3 is a long-gap specialist; it lost on false balls / noisy players (v2 shows those less).
+- Pre-registered before running: ensemble run2+run3 (equal weights, run2's decoder, which equals
+  run3's) replaces run2 under the same rule: atd_like up, base drop < 0.03, mean over the 8 not down.
+  `mtah.stress` now takes "dirA+dirB" specs and caches per-model probabilities.
+- Ensemble stress (run2 / run3 rows reproduce the earlier runs exactly), run2 -> run2+run3:
+  base 0.750 -> 0.745, ball_heavy 0.701 -> 0.713, players_heavy 0.738 -> 0.735,
+  false_ball 0.730 -> 0.733, fragment 0.753 -> 0.746, harsh 0.677 -> 0.664,
+  long_gaps 0.678 -> 0.703, **atd_like 0.663 -> 0.697**; mean 0.711 -> **0.717**.
+  Rule: atd_like up, base drop 0.006 < 0.03, mean up -> **PASSES. Ensemble run2+run3 is primary.**
+- Submission `nn_ens23` (`python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3
+  --name nn_ens23`, run2's decoder): valid; H 37.4 / A 26.2 / D 36.4%, 306 possessions, mean
+  13.2 s, home share 0.59 (close to nn_run2). sha256 `54711f56...d379d1`. Backed up.
+- `train.py --rand {off,v1,v2,mix}`. Note: run2 was trained when `--domain_rand` meant v1
+  (= `--rand v1` now); run3 = `--rand v2`; `--domain_rand` is kept as an alias of v2.
+- Next Colab run4 = `--rand mix --L 1500 --steps 300` (v1 or v2 per sample: a generalist that has
+  also seen long ball gaps). Pre-registered: same rule as run3, against the current primary.
+
 ## Next
-- [ ] Colab run3: `--domain_rand --L 1500 --steps 300` (randomisation v2, 60 s windows).
-  Pre-registered rule: run3 replaces run2 if atd_like improves, base drops < 0.03 and the mean
-  over all 8 stress scenarios does not drop.
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.
 - [ ] Smart Tagging as extra evidence (BAR-ATH only; set pieces -> restarts / dead ball).
 - [ ] Measure ATD noise statistics when data arrives -> set `CorruptCfg`.
