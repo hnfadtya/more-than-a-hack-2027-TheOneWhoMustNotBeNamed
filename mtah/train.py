@@ -24,7 +24,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from .augment import CorruptCfg, corrupt
+from .augment import CorruptCfg, corrupt, randomized
 from .common import X, Match
 from .features import featurize
 from .infer import DEFAULT_DECODE, predict_match, probs_to_codes
@@ -52,8 +52,9 @@ def ball_z(m):
 class Windows(Dataset):
     """Random L-frame windows inside a run, freshly corrupted every time they are drawn."""
 
-    def __init__(self, matches, L, n, cfg, seed):
+    def __init__(self, matches, L, n, cfg, seed, domain_rand=False):
         self.matches, self.L, self.n, self.cfg, self.seed = matches, L, n, cfg, seed
+        self.domain_rand = domain_rand
         self.blocks = [(i, a, b) for i, m in enumerate(matches) for a, b in m.runs() if b - a > 50]
         w = np.array([b - a for _, a, b in self.blocks], dtype=np.float64)
         self.p = w / w.sum()
@@ -69,8 +70,9 @@ class Windows(Dataset):
         s = int(rng.integers(a, max(a, b - L) + 1))
         e = min(b, s + L)
         z = ball_z(m)
+        cfg = randomized(self.cfg, rng) if self.domain_rand else self.cfg
         pxy, team, bxy, lab = corrupt(m.players_xy[s:e], m.team, m.ball_xy[s:e], m.label[s:e],
-                                      rng, self.cfg, None if z is None else z[s:e])
+                                      rng, cfg, None if z is None else z[s:e])
         players, pmask, ball = featurize(pxy, team, bxy, m.fps)
         y = np.full(L, X, dtype=np.int64)
         y[:e - s] = lab
@@ -140,6 +142,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--fresh", action="store_true", help="ignore an existing last.pt")
+    ap.add_argument("--domain_rand", action="store_true",
+                    help="random corruption level per sample (mtah.augment.randomized)")
     ap.add_argument("--min_spell", type=int, default=25,
                     help="frames; shorter live-play team spells are uncontrolled touches and are "
                          "given back to the previous team (mtah.labels). 0 = raw labels")
@@ -194,7 +198,8 @@ def main():
 
     use_amp = args.device != "cpu"
     for epoch in range(start_epoch, args.epochs):
-        ds = Windows(train_m, args.L, args.steps * args.batch, cfg, seed=args.seed * 100003 + epoch)
+        ds = Windows(train_m, args.L, args.steps * args.batch, cfg, seed=args.seed * 100003 + epoch,
+                     domain_rand=args.domain_rand)
         dl = DataLoader(ds, batch_size=args.batch, shuffle=False, num_workers=args.workers,
                         pin_memory=use_amp, drop_last=True)
         t0, run_loss = time.time(), 0.0
