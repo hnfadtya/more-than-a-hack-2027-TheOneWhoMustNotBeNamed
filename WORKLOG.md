@@ -216,6 +216,39 @@ Competition data expected by ~12 Nov.
   Plan: ft1 on v2 -> use ft1 to re-snap more frames (harder balls) -> ft2 (self-training,
   labels still 100% algorithmic).
 
+### 2026-11-15 - post-decoder study (written BEFORE any result is seen)
+Context: the repo was reproduced on a new machine (all hashes match). Two cheap candidates that
+need no retraining, judged on IDSSE validation only (J03WMX + J03WR9, `mtah.stress` fixed seeds,
+the 8 scenarios), model = ensemble run2+run3. Baseline = current decoder. Ideas come from the
+public repos of other teams (DSBA: touch snapping; YT / 2hClub: D share), re-implemented, not copied.
+- Study 1, dead-ball share. Diagnostic first: predicted vs ground-truth H/A/D share on graded
+  frames and number of D runs, per scenario. Candidate: additive bias b on log p(D) before the
+  decoder, b in {-0.3, -0.15, +0.15, +0.3}. A share gap alone is NOT evidence to move: IDSSE's D is
+  DFL's BallStatus and the competition's D share is unknown.
+- Study 2, touch snapping (post-decoder). Touch = frame where |v(t+3) - v(t-3)| >= 4 m/s (ball
+  velocity from 1-frame differences) with a player within 2.0 m (values documented by DSBA, not
+  tuned). Each team switch (H<->A) and each restart (D -> H/A) boundary moves to the first touch by a
+  player of the NEW team within +-W frames, if both neighbours keep their min duration.
+  W in {12, 25, 50} frames. Evaluated on the ball track as the model sees it (corrupted).
+  Caveat: IDSSE labels flip at DFL touches; the competition's convention is not known.
+- Adoption rule (both studies, same as above): mean spellF1 over the 8 scenarios up by >= 0.005
+  AND atd_like up AND base not down by more than 0.01. Among passing options take the best mean,
+  ties -> the smaller |b| / W. Study 2 is run on top of Study 1's outcome (b = 0 if not adopted).
+  If nothing passes, the current decoder stays. No other options, no re-tuning after the result.
+- The public 5 minutes are printed once, after the decision, as a pipeline check only.
+
+- Result (`python -m mtah.post_study`, outputs/post_study.json). Baseline reproduces the earlier
+  ensemble stress exactly (mean 0.7170, atd_like 0.6970). Study 1a: predicted vs ground-truth shares
+  on graded frames agree in every scenario (D 0.417-0.420 vs 0.417 gt; H 0.31, A 0.27), so the model
+  is not biased on D on IDSSE even under atd_like. Study 1b: D bias b = -0.30 / -0.15 / +0.15 /
+  +0.30 -> mean 0.7172 / 0.7168 / 0.7159 / 0.7169, atd_like 0.6959 / 0.6941 / 0.6933 / 0.6939: none
+  passes (atd_like down, gains < 0.005). Study 2: touch snapping W = 12 / 25 / 50 -> mean 0.7146 /
+  0.7068 / 0.6830, atd_like 0.6932 / 0.6864 / 0.6582, base 0.7450 / 0.7381 / 0.7162: all worse, the
+  loss grows with W. **Neither is adopted; the decoder stays as is and nn_ens23 is unchanged.**
+  Not measured: the precision of the touch detector itself; the competition GT's switch convention
+  (touch vs pass) is still unknown. The D share of BAR-ATH (36.4%) vs IDSSE gt (41.7%) is a
+  property of the two matches / label sources, not evidence of a model bias.
+
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.
 - [ ] Smart Tagging as extra evidence (BAR-ATH only; set pieces -> restarts / dead ball).
