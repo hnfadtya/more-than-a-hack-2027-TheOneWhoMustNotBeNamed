@@ -310,6 +310,22 @@ kept only where the ATD ball and ft1 agree within 15 px.
 - v3 built (19 min on M1): 26400 sampled frames, snapped to ft1 48.5% (v2 with COCO: 40.6%),
   snap |shift| median 6.3 px. train 11688 pos / 5779 neg, val 1110 pos / 546 neg (v2: 6122 / 585).
 - **Label check: 30/30 boxes on the ball (>= 27 required) -> continue to training.**
+- ft2 trained on Colab (user), best.pt sha256 `ce0d1b40b2c865064bec8011e5ace155c01dd6e3cc78025ba63b5805aae9d777`.
+- **Stage A ft2: PASS but no better than ft1.** tau 0.05: top-1 precision 74.9% (ft1 74.4%),
+  recall 70.5% (68.4%), err 0.63 m (0.62), ATD-missing detection 53.5% (53.9%). Precision flat
+  over tau again (74.8-75.2%). Doubling the labels did not move the detector: the ceiling is
+  likely the ball itself (tiny, occluded, motion blur at 1920 px) or the ATD reference, not data.
+- **Stage B ft2: FAIL.** vball_f0.535_p0.649_e0.63_b12 -> 0.7225 < 0.7363 required (ft1: 0.7313).
+  -> **ft2 not adopted; ft1 / nn_ens23_vb1 stays.** Note: ft1 and ft2 have near-identical inputs
+  to the simulation yet differ by 0.009, so Stage B has ~0.01 simulation noise between nearby
+  settings (different random draws). ft1's margin over atd_like (+0.034) is well above it; a
+  ft1-vs-ft2 margin of 0.005 would not have been.
+- **Colab GPU fill is NOT reproducible against the M1** (ft1 weights, first 2000 gap frames,
+  Colab CUDA batch 32 vs M1 MPS batch 8): detections 1000 vs 981 (19 only on Colab, 0 only on M1),
+  xy identical on 61% of common frames (max 17 m), conf identical on 14% (max |d| 0.25). MPS vs
+  CPU was identical (48 frames). -> per the rule no Colab fill is used. For the repo: the fill must
+  be regenerated on CPU or Apple MPS; CUDA gives a different (similar-quality) ball file. Cause not
+  isolated (CUDA kernels / TF32, batch size, or video decode build).
 
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.
