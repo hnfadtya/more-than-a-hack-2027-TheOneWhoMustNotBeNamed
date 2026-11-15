@@ -79,10 +79,20 @@ def main():
     ap.add_argument("--decoder", help="decoder.json (default: the first model's)")
     ap.add_argument("--name", required=True, help="file name: evaluation/results/<name>.csv")
     ap.add_argument("--refresh", action="store_true", help="recompute cached probabilities")
+    ap.add_argument("--vball", help="fill ATD ball gaps from cache/<game>_vball_<TAG>.npz "
+                                    "(python -m mtah.vball fill --tag TAG)")
     args = ap.parse_args()
 
     from . import atd
     m = atd.load()
+    if args.vball:
+        from .vball import apply_fill
+        graded = m.period != 0
+        before = np.mean(~np.isnan(m.ball_xy[graded, 0]))
+        m.ball_xy, n = apply_fill(m, args.vball)
+        m.name = f"{m.name}_vball-{args.vball}"        # separate probability cache
+        print(f"  video ball '{args.vball}': filled {n} frames, ball seen on graded frames "
+              f"{before:.1%} -> {np.mean(~np.isnan(m.ball_xy[graded, 0])):.1%}")
     w = np.array(args.weights or [1.0] * len(args.model), dtype=np.float64)
     w = w / w.sum()
     probs = sum(wi * model_probs(d, m, args.refresh).astype(np.float64)

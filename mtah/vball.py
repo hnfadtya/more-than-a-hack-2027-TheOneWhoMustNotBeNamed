@@ -77,7 +77,9 @@ def read_frames(path, start, n):
 
 def detect(model, frames, imgsz, conf, device):
     """-> list per frame of (K,3) arrays: pixel x, pixel y (box centre), confidence."""
-    res = model.predict(frames, imgsz=imgsz, conf=conf, classes=[COCO_SPORTS_BALL],
+    # COCO models: class 32 'sports ball'; our fine-tuned models have a single class 0 'ball'
+    cls = 0 if len(model.names) == 1 else COCO_SPORTS_BALL
+    res = model.predict(frames, imgsz=imgsz, conf=conf, classes=[cls],
                         device=device, verbose=False)
     out = []
     for r in res:
@@ -180,6 +182,107 @@ def probe(args):
             ok.append(np.linalg.norm(top - m.ball_xy[g]) < args.radius)
         line.append(f"{k:+d}:{np.mean(ok) if ok else float('nan'):.1%}")
     print("  alignment (top1 hit vs ATD at t+k): " + "  ".join(line))
+
+
+def fill_path(tag, game=GAME):
+    return os.path.join(ROOT, "cache", f"{game}_vball_{tag}.npz")
+
+
+def fill(args):
+    """Detect the ball on every graded frame where the ATD has none -> cache/<game>_vball_<tag>.npz.
+
+    Exactly what Stage A measured: top-1 detection per frame at conf >= tau, mapped to the pitch
+    with that frame's homography, no further filtering. Positions are rounded to 1 cm and
+    confidences to 1e-3 so tiny numeric differences between devices do not leak further.
+    Saves a checkpoint every --save_every frames and resumes from it.
+    """
+    import cv2
+    from ultralytics import YOLO
+
+    m = Match.load(os.path.join(ROOT, "cache", f"{GAME}_tactical_atd.npz"))
+    pitch = GAMES[GAME]["pitch"]
+    mats, _, valid = load_homography()
+    need = np.flatnonzero((m.period != 0) & np.isnan(m.ball_xy[:, 0]) & valid)
+    if args.limit:
+        need = need[:args.limit]                      # smoke tests only
+    out = fill_path(args.tag)
+    part = out + ".partial.npz"
+    done_f, done_xy, done_c = [], [], []
+    start = 0
+    if os.path.isfile(part):
+        z = np.load(part)
+        start = int(z["next"])
+        done_f, done_xy, done_c = list(z["frame"]), list(z["xy"]), list(z["conf"])
+        print(f"resuming at {start}/{len(need)}")
+    model = YOLO(args.weights)
+    cap = cv2.VideoCapture(video_path())
+    todo = need[start:]
+    pos = 0
+    if len(todo):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(todo[0]))
+        pos = int(todo[0])
+    t0 = time.time()
+    buf_f, buf_img = [], []
+
+    def flush():
+        if not buf_f:
+            return
+        dets = detect(model, buf_img, args.imgsz, args.tau, args.device)
+        for f, d in zip(buf_f, dets):
+            if not len(d):
+                continue
+            top = d[np.argmax(d[:, 2])]
+            xy = pixel_to_pitch(mats[f], top[None, :2], pitch)[0]
+            done_f.append(f)
+            done_xy.append(np.round(xy, 2).astype(np.float32))
+            done_c.append(np.float32(round(float(top[2]), 3)))
+        buf_f.clear()
+        buf_img.clear()
+
+    def save(path, nxt):
+        np.savez_compressed(path, frame=np.array(done_f, dtype=np.int32),
+                            xy=np.array(done_xy, dtype=np.float32).reshape(-1, 2),
+                            conf=np.array(done_c, dtype=np.float32), next=nxt,
+                            weights=os.path.basename(args.weights), tau=args.tau,
+                            imgsz=args.imgsz, device=args.device)
+
+    for i, f in enumerate(todo):
+        while pos < f:
+            cap.grab()
+            pos += 1
+        ok, img = cap.read()
+        pos += 1
+        if not ok:
+            raise SystemExit(f"video ended early at frame {f}")
+        buf_f.append(int(f))
+        buf_img.append(img)
+        if len(buf_f) == args.batch:
+            flush()
+        k = start + i + 1
+        if k % args.save_every == 0:
+            flush()
+            save(part, k)
+            rate = (i + 1) / (time.time() - t0)
+            print(f"  {k}/{len(need)} frames, {rate:.1f} fps, eta {(len(need) - k) / rate / 60:.0f} min,"
+                  f" detected {len(done_f) / k:.1%}", flush=True)
+    if buf_f:
+        flush()
+    cap.release()
+    save(out, len(need))
+    if os.path.isfile(part):
+        os.remove(part)
+    print(f"wrote {out}: {len(done_f)} detections on {len(need)} gap frames "
+          f"({len(done_f) / max(1, len(need)):.1%})")
+
+
+def apply_fill(m, tag):
+    """Copy of the ATD ball with the gaps filled from cache/<game>_vball_<tag>.npz."""
+    z = np.load(fill_path(tag))
+    ball = m.ball_xy.copy()
+    f = z["frame"]
+    gap = np.isnan(ball[f, 0])            # never overwrite an ATD ball
+    ball[f[gap]] = z["xy"][gap]
+    return ball, int(gap.sum())
 
 
 def px_per_metre(mat, xy_m, pitch):
@@ -384,6 +487,15 @@ def check(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
+    fl = sub.add_parser("fill")
+    fl.add_argument("--weights", default=os.path.join(ROOT, "outputs", "vball", "ft1", "best.pt"))
+    fl.add_argument("--tag", default="ft1")
+    fl.add_argument("--tau", type=float, default=0.05)     # Stage A choice, WORKLOG 2026-11-15
+    fl.add_argument("--imgsz", type=int, default=1920)
+    fl.add_argument("--batch", type=int, default=8)
+    fl.add_argument("--save_every", type=int, default=2000)
+    fl.add_argument("--device", default="mps")
+    fl.add_argument("--limit", type=int, default=0)
     r = sub.add_parser("refine")
     r.add_argument("--dataset", default=os.path.join(ROOT, "outputs", "vball", "dataset"))
     r.add_argument("--weights", default=os.path.join(ROOT, "outputs", "vball", "yolo11s.pt"))
@@ -434,6 +546,8 @@ def main():
         check(args)
     elif args.cmd == "refine":
         refine(args)
+    elif args.cmd == "fill":
+        fill(args)
 
 
 if __name__ == "__main__":

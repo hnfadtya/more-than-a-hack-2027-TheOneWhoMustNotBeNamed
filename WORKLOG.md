@@ -215,6 +215,24 @@ Competition data expected by ~12 Nov.
   positives and drops the negative tile of every dropped frame (the real ball may be in it).
   Plan: ft1 on v2 -> use ft1 to re-snap more frames (harder balls) -> ft2 (self-training,
   labels still 100% algorithmic).
+- v2 built: train 6122 pos / 3101 neg, val 585 pos / 288 neg (snapped 40.6%). Human check of
+  check_v2 OK. ft1 = YOLO11s fine-tuned on v2 (Colab, user), best.pt sha256 `a07e9c5c...5698f`.
+- **Pre-registered before evaluating ft1:** Stage A threshold = the LOWEST tau in
+  {0.05, 0.1, 0.2, 0.3, 0.5, 0.7} whose top-1 precision (2 m, held-out minute blocks, imgsz 1920)
+  is >= 70% (fill rate matters more than precision in the Stage B surface). If none passes, ft1
+  fails Stage A. Probe: 40 segments x 15 frames, seed 0, val blocks only.
+- **Stage A ft1: PASS.** 600 val frames, imgsz 1920. tau 0.05: top-1 precision 74.4% (pretrained
+  35%), recall 68.4% (38%), err median 0.62 m vs the (noisy) ATD, detection on 53.9% of
+  ATD-missing frames. Precision flat over tau (74.4-76.0%), fill falls 53.9% -> 25.7%. No frame
+  offset. 7.0 fps on M1 MPS. -> tau = 0.05 per the rule.
+- **Stage B ft1: PASS.** fill 0.539, prec 0.744 - 0.10 = 0.644, err 0.62, bursty false (12):
+  ensemble spellF1 atd_like 0.6970 -> **0.7313 (+0.034 >= 0.01)**.
+- Remaining before adoption: full-match fill on BAR-ATH (top-1 per ATD-missing graded frame,
+  tau 0.05, no extra filtering -- exactly what was measured) and the Smart Tagging sanity check.
+- `python -m mtah.vball fill --tag ft1` -> `cache/BAR-ATH_vball_ft1.npz` (64643 gap frames,
+  positions rounded to 1 cm, conf to 1e-3, checkpoint/resume). Speed on M1: MPS 7.7 fps
+  (~2.3 h), CPU 1.8 fps (~10 h). Smoke test 48 frames: MPS vs CPU **identical** after rounding.
+  `make_submission --vball ft1` fills only frames where the ATD has no ball.
 
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.
