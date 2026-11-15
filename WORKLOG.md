@@ -135,6 +135,87 @@ Competition data expected by ~12 Nov.
 - Next Colab run4 = `--rand mix --L 1500 --steps 300` (v1 or v2 per sample: a generalist that has
   also seen long ball gaps). Pre-registered: same rule as run3, against the current primary.
 
+### 2026-11-14
+- New machine (Apple M1, Python 3.12.16): `nn_ens23` regenerated with `--refresh`, sha256
+  `54711f56...d379d1` -- identical to the 11 Nov file. Pipeline reproduces across machines (~1 min).
+- Smart Tagging vs our `nn_ens23` predictions (no ground truth involved, aggregates only):
+  82% of graded frames covered by a tag; agreement with the tagged team BUILD UP 93%,
+  PROGRESSION 85%, transitions/long ball 68-69%, box/final-third/set-piece windows 38-51% (long
+  windows that mix dead ball and both teams). "DEFENDING ..." codes mirror the attacking codes
+  exactly (same frames, other team). -> Too coarse (median 17-35 s windows) to time hand-overs;
+  **Jalur 2 (Smart Tagging as model input) deprioritised.** Kept as a label-free sanity check.
+- Jalur 1 started: `mtah/vball.py`. Video 1920x1080, 25 fps, 199319 frames (= submission rows).
+  Probe, pretrained COCO YOLO11s at imgsz 1920, 300 frames, vs the ATD ball (2 m radius):
+  recall 34-38%, top-1 precision 35-41%, error 0.31 m when right, 3.3 fps on M1 MPS.
+  No frame offset. -> Not usable as is; fine-tune on ATD-derived boxes.
+- **Pre-registered, before any fine-tuned result:**
+  - Detector training data = frames where the ATD sees the ball (automatic labels from the ATD,
+    no human input), projected to pixels with the provided homography. Validation = held-out
+    time blocks (every 10th minute of video), never trained on. Threshold chosen on those blocks.
+  - Stage A (detector): top-1 precision >= 85% within 2 m on the held-out blocks.
+  - Stage B (effect): on IDSSE val, `atd_like` with ball gaps refilled at the detector's measured
+    rates (fill rate on ATD-missing frames, false rate = 1 - precision, measured error).
+    Video ball is used if ensemble spellF1 rises >= 0.01 over plain `atd_like`.
+  - Sanity: agreement with Smart Tagging on BUILD UP / PROGRESSION does not drop > 2 points.
+  - Known caveat: precision on ATD-visible frames may be optimistic for the gaps (harder frames).
+- Dataset (`python -m mtah.vball dataset`): 6000 train / 600 val frames (>= 5 frames apart,
+  disjoint minute blocks), 6600 positive + 3219 negative 640x640 tiles, box = 0.6 m at the local
+  image scale (median 12 px). Fine-tune notebook `notebooks/colab_vball.ipynb`.
+- Stage B response surface (`mtah.stress --vball FILL PREC ERR`, IDSSE val, ensemble run2+run3,
+  false detections placed on a random player = worst case): atd_like 0.6970 (reproduces);
+  fill 1 / prec 1 **0.7851**; 0.5/0.95 0.7488; 0.5/0.85 0.7271; 0.5/0.7 0.7292; 0.3/0.85 0.7322
+  (all err 0.3 m). Differences < ~0.005 are noise. -> Up to +0.09; a mediocre detector still +0.03.
+- Visual check (human, 30 tiles): 10 boxes off the ball. Measured why (pretrained YOLO vs ATD,
+  aggregates): no frame offset (best k = 0, median 9 px on fast balls); residual median 6 / 9 / 11 px
+  for slow / medium / fast balls, ball centre ~2.4 px ABOVE the ATD point when slow (= one ball
+  radius at ~21 px/m: the ATD marks the ground point under the ball) and more when bouncing.
+  -> `mtah.vball refine`: snap the label to a pretrained detection within 15 px (40.8% of tiles,
+  median move 6.2 px), else shift up one ball radius; box 1.0 m (was 0.6). Originals kept in
+  labels_atd/.
+- Second visual check after refine: ~14/30 judged off (worse). Suspects: snapping onto a
+  pretrained false positive (feet/heads next to the ball), a 4 px ball hard to see, or ATD false
+  balls. Zoomed crops written (`mtah.vball check --zoom 4` -> outputs/vball/check_zoom/).
+- **OPEN (paused 14 Nov evening):**
+  1. Human classification of the 30 zoomed crops: A box on ball / B ball near, original ATD dot
+     better / C both off but ball near / D no ball at all. B -> drop snapping; C -> label noise,
+     train anyway (maybe bigger box); D -> ATD false balls, filter tiles first.
+  2. Proposed (NOT yet agreed): Stage A precision 85% -> 70%, in exchange for a harsher Stage B
+     (bursty false detections ~12 frames instead of per-frame; precision used = measured - 0.10).
+  3. Dataset zip NOT yet uploaded; fine-tune (user, Colab) waits on 1.
+
+### 2026-11-15
+- Zoomed crop check (human, 30 tiles after refine): A box on ball 17, B 0, C 0, D no ball 2,
+  remaining 11 = ball visible in the crop but far from both the box and the original ATD dot.
+  The ATD dot is almost always inside the box (refine moves it only a few px). -> ~37% of
+  positive labels are off by more than a box width; this is not a few-pixel bias.
+- **Rule revision (agreed with the team, BEFORE any fine-tuned detector exists).** Replaces the
+  14 Nov Stage A/B:
+  - Stage A: top-1 precision **>= 70%** within 2 m on the held-out minute blocks (was 85%).
+    Reason: the IDSSE response surface shows prec 0.7 still gives ~+0.03, so 85% could reject a
+    useful detector.
+  - Stage B, made harsher to compensate: refill simulated with fill = measured fill rate on
+    ATD-missing frames, precision = **measured - 0.10** (gaps are harder frames), false
+    detections **bursty (mean 12 frames, one random player per burst)** instead of per-frame,
+    err = measured median error. Adopt if ensemble spellF1 >= plain `atd_like` + 0.01.
+  - Sanity unchanged: Smart Tagging agreement on BUILD UP / PROGRESSION does not drop > 2 points.
+- Harsher Stage B surface (bursty false detections, mean 12 frames on one player), ensemble,
+  err 0.3 m: atd_like 0.6970; fill/prec 0.5/0.85 0.7422, 0.5/0.75 0.7360, 0.5/0.6 0.7359,
+  0.3/0.6 0.7213, 0.7/0.75 0.7424. Bursty false balls hurt LESS than per-frame ones (0.5/0.85:
+  0.742 vs 0.727) -- per-frame flicker makes velocity spikes. Even prec 0.6 gives +0.02-0.04;
+  fill rate matters more than precision in this range.
+- Recount on the zoomed crops (the earlier 17/0/0/2 was read off the unzoomed folder):
+  A 18, B 0, C 0, D 3, rest off. Split by refine outcome: **snapped (ATD + pretrained detector
+  agree) 15/15 correct; unsnapped (ATD alone) 1/15 correct, 2 marginal, 12 off.** -> The ATD
+  ball is itself wrong on a large share of the frames where it reports one (likely predicted /
+  interpolated). Labels are trustworthy only where the ATD and a detector agree.
+- Consequence for Stage A (noted, rule NOT changed): precision is measured against the ATD ball,
+  which is often wrong, so measured precision UNDERESTIMATES the detector; the rule is
+  conservative.
+- Dataset v2: 15000 / 1500 frames sampled, `refine --drop_unsnapped` keeps only snapped
+  positives and drops the negative tile of every dropped frame (the real ball may be in it).
+  Plan: ft1 on v2 -> use ft1 to re-snap more frames (harder balls) -> ft2 (self-training,
+  labels still 100% algorithmic).
+
 ### 2026-11-15 - post-decoder study (written BEFORE any result is seen)
 Context: the repo was reproduced on a new machine (all hashes match). Two cheap candidates that
 need no retraining, judged on IDSSE validation only (J03WMX + J03WR9, `mtah.stress` fixed seeds,
