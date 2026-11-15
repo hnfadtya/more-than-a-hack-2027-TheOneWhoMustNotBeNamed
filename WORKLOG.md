@@ -233,6 +233,26 @@ Competition data expected by ~12 Nov.
   positions rounded to 1 cm, conf to 1e-3, checkpoint/resume). Speed on M1: MPS 7.7 fps
   (~2.3 h), CPU 1.8 fps (~10 h). Smoke test 48 frames: MPS vs CPU **identical** after rounding.
   `make_submission --vball ft1` fills only frames where the ATD has no ball.
+- Full fill done (2026-11-15 01:18 WIB, ~2.7 h on MPS, slowed 7.2 -> 6.5 fps with heat):
+  35023 detections on 64643 gap frames (54.2%, matches Stage A 53.9%).
+  `cache/BAR-ATH_vball_ft1.npz` sha256 `5b5ca25e41654b465d2bbd4994113bf9e98a9012aa489cadbd98fc8f05fb333f`
+  (frame-level derived data: never committed; backed up on Drive).
+
+## 2026-11-15 -- video ball adopted: nn_ens23_vb1
+- `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 --vball ft1 --name nn_ens23_vb1`
+  (61 s on CPU). Ball seen on graded frames 59.3% -> 81.4%. Graded: H 36.7 / A 26.3 / D 37.0%,
+  304 possessions, mean 13.2 s, home share 0.58 (nn_ens23: 37.4 / 26.2 / 36.4%, 306). 4.9% of
+  graded frames change label.
+- **Sanity check (pre-registered: BUILD UP / PROGRESSION agreement must not drop > 2 points): PASS.**
+  BUILD UP 93.1% -> 92.9% (-0.2), PROGRESSION 84.9% -> 85.0% (+0.2). Other codes move by < 1 point
+  in "pred = tagged team" except SET PIECES -1.1 and GOALS -2.6, where the shift is to D, not to the
+  other team (goal celebrations / restarts are dead ball). "pred = other team" falls on the attacking
+  codes (BALL IN THE BOX 29.3 -> 27.8%, CREATING CHANCES 23.5 -> 21.5%).
+- -> **Primary submission: `nn_ens23_vb1.csv`**, sha256
+  `ee60898ca2a090b97b01fe990f68af7cec552cdb1f97b94c6593d726a45fce60`. Backup in `submissions_backup/`.
+  Previous primary nn_ens23 (`54711f56...`) kept as fallback.
+- Reproduction chain: `vball fill --tag ft1` (ft1 best.pt `a07e9c5c...5698f`, needs the tactical video)
+  -> `make_submission ... --vball ft1`.
 
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.

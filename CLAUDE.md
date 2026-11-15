@@ -40,8 +40,15 @@ hackathon.talentarena@mobileworldcapital.com (GitHub issues on the Metrica repo 
 - Training on the user's Colab A100 via `notebooks/colab_train.ipynb` (outputs on Google Drive
   `MyDrive/Metrica-Hackathon/mtah/outputs/<run>/`). Inference on BAR-ATH: local CPU, deterministic.
 
-## Current state (2026-11-11)
-- **Primary: ensemble run2+run3** (equal weights, run2's decoder: min (25,25,50), team switch 8,
+## Current state (2026-11-15)
+- **Primary: `nn_ens23_vb1`** = the ensemble below + video ball (YOLO11s ft1 fills ATD ball gaps,
+  `mtah/vball.py`; Stage A/B + Smart Tagging sanity PASS, WORKLOG 2026-11-14/15).
+  `python -m mtah.vball fill --tag ft1` (needs tactical video, ~2.7 h MPS) then
+  `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 --vball ft1 --name nn_ens23_vb1`
+  -> sha256 `ee60898ca2a090b97b01fe990f68af7cec552cdb1f97b94c6593d726a45fce60`
+  (H 36.7 / A 26.3 / D 37.0%, 304 possessions). ft1 weights `outputs/vball/ft1/best.pt`
+  sha256 `a07e9c5c1c53996877dd5d2ab76e735bc2e5c643c97c3a1020528c813bd5698f`.
+- Fallback: ensemble run2+run3 (equal weights, run2's decoder: min (25,25,50), team switch 8,
   dead 2). Passed the pre-registered rule (stress mean 0.711 -> 0.717, atd_like 0.663 -> 0.697).
   `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 --name nn_ens23`
   -> `evaluation/results/nn_ens23.csv`, sha256
