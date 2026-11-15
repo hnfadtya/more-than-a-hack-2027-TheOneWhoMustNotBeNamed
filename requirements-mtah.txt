@@ -9,3 +9,8 @@ pyarrow==26.0.1
 matplotlib==3.11.2
 scikit-learn==1.9.1   # mtah.gbdt (imported by mtah.stress)
 torch==2.15.0   # CPU build locally: pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Video ball detection (mtah.vball, Jalur 1)
+ultralytics==8.4.212
+opencv-python==5.0.0.93
+# tests
+pytest==9.2.0

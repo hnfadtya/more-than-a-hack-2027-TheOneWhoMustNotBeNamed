@@ -238,7 +238,7 @@ Competition data expected by ~12 Nov.
   `cache/BAR-ATH_vball_ft1.npz` sha256 `5b5ca25e41654b465d2bbd4994113bf9e98a9012aa489cadbd98fc8f05fb333f`
   (frame-level derived data: never committed; backed up on Drive).
 
-## 2026-11-15 -- video ball adopted: nn_ens23_vb1
+### 2026-11-15 - video ball adopted: nn_ens23_vb1
 - `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 --vball ft1 --name nn_ens23_vb1`
   (61 s on CPU). Ball seen on graded frames 59.3% -> 81.4%. Graded: H 36.7 / A 26.3 / D 37.0%,
   304 possessions, mean 13.2 s, home share 0.58 (nn_ens23: 37.4 / 26.2 / 36.4%, 306). 4.9% of
@@ -286,6 +286,30 @@ public repos of other teams (DSBA: touch snapping; YT / 2hClub: D share), re-imp
   Not measured: the precision of the touch detector itself; the competition GT's switch convention
   (touch vs pass) is still unknown. The D share of BAR-ATH (36.4%) vs IDSSE gt (41.7%) is a
   property of the two matches / label sources, not evidence of a model bias.
+
+### 2026-11-15 - ft2 self-training (written BEFORE any result is seen)
+Idea: ft1 finds balls the COCO detector misses, so re-snapping ATD labels with ft1 keeps more
+(and harder) trustworthy labels than v2 (40.6% snapped). Labels stay 100% algorithmic: a label is
+kept only where the ATD ball and ft1 agree within 15 px.
+- Dataset v3: fresh sample, `dataset --out outputs/vball/dataset_v3 --n_train 24000 --n_val 2400
+  --gap 3 --seed 1`, then `refine --weights outputs/vball/ft1/best.pt --drop_unsnapped` (conf 0.03,
+  snap 15 px, box 1.0 m, all as v2). Train/val from the same disjoint minute blocks (`is_val`).
+- Label check before training: 30 random positive tiles of v3 (`check --zoom 4`, seed 0), human
+  eyeball. Continue only if >= 27/30 have the box on the ball; otherwise ft2 is dropped.
+- ft2 = YOLO11s from the COCO weights (not from ft1, to limit confirmation bias), same notebook
+  settings as ft1 except epochs 40 (2.5x more data): imgsz 640, batch 64, seed 0, deterministic.
+- Stage A: identical to ft1 (probe on val blocks, 40 segments x 15 frames, seed 0, imgsz 1920,
+  radius 2 m). tau = the lowest in {0.05, 0.1, 0.2, 0.3, 0.5, 0.7} with top-1 precision >= 70%.
+- Stage B: identical spec (fill = measured ATD-missing detection rate, prec = measured - 0.10,
+  err = measured, bursty false balls of 12). **ft2 replaces ft1 only if its Stage B spellF1 >=
+  0.7313 + 0.005 = 0.7363.** Otherwise ft1 / nn_ens23_vb1 stays.
+- If adopted: full fill `--tag ft2` (on Colab GPU only if a 48-frame smoke test is identical to
+  the M1 output after rounding, else on MPS), `make_submission ... --vball ft2 --name nn_ens23_vb2`,
+  then the same Smart Tagging sanity check vs nn_ens23 (BUILD UP / PROGRESSION not down > 2 points).
+- Cut-off: anything not passed by 16 Nov 23:00 WIB is not used. No other variants of ft2.
+- v3 built (19 min on M1): 26400 sampled frames, snapped to ft1 48.5% (v2 with COCO: 40.6%),
+  snap |shift| median 6.3 px. train 11688 pos / 5779 neg, val 1110 pos / 546 neg (v2: 6122 / 585).
+- **Label check: 30/30 boxes on the ball (>= 27 required) -> continue to training.**
 
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.
