@@ -22,7 +22,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from .augment import CorruptCfg, add_false_ball, corrupt, fragment_tracks, markov_missing
+from .augment import CorruptCfg, add_false_ball, corrupt, fragment_tracks, vball_fill
 from .gbdt import ball_z, load_matches
 from .make_submission import load_decoder
 from .decode import probs_to_codes
@@ -43,48 +43,6 @@ SCENARIOS = {
     "atd_like": dict(cfg=dict(ball_missing=0.22, ball_burst=430.0, ball_far_boost=2.0, ball_out_boost=8.0, ball_jitter=0.1,
                               fov_missing=0.08, fov_burst=150.0), fragment=True),
 }
-
-
-def vball_fill(bxy, clean_bxy, pxy, rng, fill, prec, err, burst=1.0):
-    """Simulate refilling ball gaps with a video ball detector (Jalur 1).
-
-    Each frame where the corrupted ball is missing (and the clean ball exists) gets a detection with
-    prob `fill`; that detection is right with prob `prec` (clean ball + N(0, err) m) and otherwise
-    lands on a random visible player (+0.5 m noise) -- the worst place for possession. Frames are
-    independent, like a per-frame detector. Uses its own rng, so the underlying scenario is
-    unchanged.
-
-    burst > 1: wrong detections come in bursts (Markov, mean `burst` frames) that stay on ONE
-    player for the whole burst -- a persistent look-alike, much harder to average out.
-    """
-    bxy = bxy.copy()
-    gap = np.flatnonzero(np.isnan(bxy[:, 0]) & ~np.isnan(clean_bxy[:, 0]))
-    hit = gap[rng.random(len(gap)) < fill]
-    if burst <= 1:
-        right = rng.random(len(hit)) < prec
-        r = hit[right]
-        bxy[r] = clean_bxy[r] + rng.normal(0, err, (len(r), 2)).astype(np.float32)
-        for t in hit[~right]:
-            vis = np.flatnonzero(~np.isnan(pxy[t, :, 0]))
-            if len(vis):
-                bxy[t] = pxy[t, rng.choice(vis)] + rng.normal(0, 0.5, 2).astype(np.float32)
-        return bxy
-    T = len(bxy)
-    wrong = markov_missing(rng, T, 1, 1.0 - prec, burst)[:, 0]
-    is_hit = np.zeros(T, bool)
-    is_hit[hit] = True
-    r = np.flatnonzero(is_hit & ~wrong)
-    bxy[r] = clean_bxy[r] + rng.normal(0, err, (len(r), 2)).astype(np.float32)
-    edges = np.flatnonzero(np.diff(np.concatenate(([0], wrong.astype(np.int8), [0]))))
-    for a, b in zip(edges[::2], edges[1::2]):
-        vis = np.flatnonzero(~np.isnan(pxy[a, :, 0]))
-        if not len(vis):
-            continue
-        s = rng.choice(vis)
-        off = rng.normal(0, 0.5, 2).astype(np.float32)
-        t = np.flatnonzero(is_hit[a:b]) + a
-        bxy[t] = pxy[t, s] + off           # NaN where that player is not tracked: no detection
-    return bxy
 
 
 def scenario_inputs(m, k, spec, seed=4321):

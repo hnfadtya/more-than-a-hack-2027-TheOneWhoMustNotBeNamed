@@ -326,6 +326,35 @@ kept only where the ATD ball and ft1 agree within 15 px.
   CPU was identical (48 frames). -> per the rule no Colab fill is used. For the repo: the fill must
   be regenerated on CPU or Apple MPS; CUDA gives a different (similar-quality) ball file. Cause not
   isolated (CUDA kernels / TF32, batch size, or video decode build).
+- **CPU vs MPS on the same 2000 gap frames (ft1, batch 8, tau 0.05): IDENTICAL** -- 981 vs 981
+  detections, xy and conf identical on 100% of them. CPU 2.4 fps (14 min for 2000; full match
+  ~7.5 h). -> Reproducibility claim for the repo: the video-ball fill is regenerated exactly on CPU
+  or Apple MPS with batch 8; not on CUDA.
+
+### 2026-11-16 - run5: PossessionNet trained with video-ball noise (written BEFORE training)
+Idea: the primary now feeds the model a ball that is 54% video detections in the ATD gaps, about a
+quarter of them wrong (often on a player, in bursts). run2/run3 never saw that kind of error in
+training. run5 sees it.
+- Code: `CorruptCfg.vball_p` (prob. per training window) applies `augment.vball_fill` (moved from
+  mtah.stress, unchanged) with random params from `augment.vball_params`: fill U(0.3, 0.8),
+  prec U(0.5, 0.95), err U(0.2, 1.0) m, burst 1 (30%) or U(5, 30) frames. Ranges are wide around
+  ft1's measured values, not tuned. vball_p = 0 draws no rng, so older configs are unchanged
+  (test). Stress after the move reproduces: atd_like 0.6970, vball ft1 scenario 0.7313.
+- Training (Colab, one run): `--rand mix --L 1500 --steps 300 --epochs 30 --batch 32 --vball_p 0.5`,
+  val idsse_J03WMX idsse_J03WR9, seed 0. Decoder tuned on its val probs like every model
+  (`mtah/tune_decoder.py`). No reruns or variants (resume after a disconnect is fine).
+- Evaluation: `mtah.stress` on the 8 scenarios + `vball_ft1` = atd_like + vball(0.539, 0.644,
+  0.62, burst 12), i.e. exactly ft1's Stage B spec. All models see identical inputs (paired).
+  Baseline = run2+run3 (primary model): vball_ft1 0.7313, atd_like 0.6970, mean of 8 0.7170.
+- Candidates: E = run2+run3+run5 (equal weights, run2's decoder); R = run5 alone (own decoder).
+- **Pass:** vball_ft1 >= baseline + 0.01 AND atd_like >= baseline - 0.005 AND mean of 8 >=
+  baseline - 0.005 AND base drop < 0.03. Among passing: highest vball_ft1; within 0.002 -> E.
+  The margin is 0.01 (not 0.005) because run5 is trained on the same family of simulated
+  detector errors it is judged on, so the simulation is optimistic for it.
+- Real-data sanity (BAR-ATH, no labels): Smart Tagging BUILD UP / PROGRESSION agreement must not
+  drop > 2 points vs nn_ens23_vb1 (92.9% / 85.0%).
+- If adopted: `make_submission --model <models> --vball ft1 --name nn_ens235_vb1` (or `nn_run5_vb1`).
+- Cut-off 16 Nov 23:00 WIB; otherwise nn_ens23_vb1 stays.
 
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.
