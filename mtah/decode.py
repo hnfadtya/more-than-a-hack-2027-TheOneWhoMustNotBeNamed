@@ -151,12 +151,14 @@ DEFAULT_DECODE = dict(min_dur=(50, 50, 100),
                       switch=((0.0, 8.0, 2.0), (8.0, 0.0, 2.0), (2.0, 2.0, 0.0)))
 
 
-def probs_to_codes(probs, runs, min_dur, switch):
+def probs_to_codes(probs, runs, min_dur, switch, d_bias=0.0):
     """Per-frame H/A/D probabilities (T,3) -> decoded codes, X outside runs.
 
     Rounded first, so last-bit float differences between machines cannot flip a decision; NaN rows
-    (no prediction) become uniform, i.e. no opinion.
+    (no prediction) become uniform, i.e. no opinion. `d_bias` is added to log p(D) (0 = off).
     """
     p = np.round(np.nan_to_num(np.asarray(probs, dtype=np.float64), nan=1 / 3), PROB_DECIMALS)
     logp = np.log(np.clip(p, 1e-4, 1.0))
+    if d_bias:
+        logp[:, 2] += d_bias
     return decode_runs(logp, runs, min_dur, switch)
