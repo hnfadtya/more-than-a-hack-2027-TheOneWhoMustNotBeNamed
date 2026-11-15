@@ -215,6 +215,44 @@ Competition data expected by ~12 Nov.
   positives and drops the negative tile of every dropped frame (the real ball may be in it).
   Plan: ft1 on v2 -> use ft1 to re-snap more frames (harder balls) -> ft2 (self-training,
   labels still 100% algorithmic).
+- v2 built: train 6122 pos / 3101 neg, val 585 pos / 288 neg (snapped 40.6%). Human check of
+  check_v2 OK. ft1 = YOLO11s fine-tuned on v2 (Colab, user), best.pt sha256 `a07e9c5c...5698f`.
+- **Pre-registered before evaluating ft1:** Stage A threshold = the LOWEST tau in
+  {0.05, 0.1, 0.2, 0.3, 0.5, 0.7} whose top-1 precision (2 m, held-out minute blocks, imgsz 1920)
+  is >= 70% (fill rate matters more than precision in the Stage B surface). If none passes, ft1
+  fails Stage A. Probe: 40 segments x 15 frames, seed 0, val blocks only.
+- **Stage A ft1: PASS.** 600 val frames, imgsz 1920. tau 0.05: top-1 precision 74.4% (pretrained
+  35%), recall 68.4% (38%), err median 0.62 m vs the (noisy) ATD, detection on 53.9% of
+  ATD-missing frames. Precision flat over tau (74.4-76.0%), fill falls 53.9% -> 25.7%. No frame
+  offset. 7.0 fps on M1 MPS. -> tau = 0.05 per the rule.
+- **Stage B ft1: PASS.** fill 0.539, prec 0.744 - 0.10 = 0.644, err 0.62, bursty false (12):
+  ensemble spellF1 atd_like 0.6970 -> **0.7313 (+0.034 >= 0.01)**.
+- Remaining before adoption: full-match fill on BAR-ATH (top-1 per ATD-missing graded frame,
+  tau 0.05, no extra filtering -- exactly what was measured) and the Smart Tagging sanity check.
+- `python -m mtah.vball fill --tag ft1` -> `cache/BAR-ATH_vball_ft1.npz` (64643 gap frames,
+  positions rounded to 1 cm, conf to 1e-3, checkpoint/resume). Speed on M1: MPS 7.7 fps
+  (~2.3 h), CPU 1.8 fps (~10 h). Smoke test 48 frames: MPS vs CPU **identical** after rounding.
+  `make_submission --vball ft1` fills only frames where the ATD has no ball.
+- Full fill done (2026-11-15 01:18 WIB, ~2.7 h on MPS, slowed 7.2 -> 6.5 fps with heat):
+  35023 detections on 64643 gap frames (54.2%, matches Stage A 53.9%).
+  `cache/BAR-ATH_vball_ft1.npz` sha256 `5b5ca25e41654b465d2bbd4994113bf9e98a9012aa489cadbd98fc8f05fb333f`
+  (frame-level derived data: never committed; backed up on Drive).
+
+### 2026-11-15 - video ball adopted: nn_ens23_vb1
+- `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 --vball ft1 --name nn_ens23_vb1`
+  (61 s on CPU). Ball seen on graded frames 59.3% -> 81.4%. Graded: H 36.7 / A 26.3 / D 37.0%,
+  304 possessions, mean 13.2 s, home share 0.58 (nn_ens23: 37.4 / 26.2 / 36.4%, 306). 4.9% of
+  graded frames change label.
+- **Sanity check (pre-registered: BUILD UP / PROGRESSION agreement must not drop > 2 points): PASS.**
+  BUILD UP 93.1% -> 92.9% (-0.2), PROGRESSION 84.9% -> 85.0% (+0.2). Other codes move by < 1 point
+  in "pred = tagged team" except SET PIECES -1.1 and GOALS -2.6, where the shift is to D, not to the
+  other team (goal celebrations / restarts are dead ball). "pred = other team" falls on the attacking
+  codes (BALL IN THE BOX 29.3 -> 27.8%, CREATING CHANCES 23.5 -> 21.5%).
+- -> **Primary submission: `nn_ens23_vb1.csv`**, sha256
+  `ee60898ca2a090b97b01fe990f68af7cec552cdb1f97b94c6593d726a45fce60`. Backup in `submissions_backup/`.
+  Previous primary nn_ens23 (`54711f56...`) kept as fallback.
+- Reproduction chain: `vball fill --tag ft1` (ft1 best.pt `a07e9c5c...5698f`, needs the tactical video)
+  -> `make_submission ... --vball ft1`.
 
 ### 2026-11-15 - post-decoder study (written BEFORE any result is seen)
 Context: the repo was reproduced on a new machine (all hashes match). Two cheap candidates that
@@ -248,6 +286,75 @@ public repos of other teams (DSBA: touch snapping; YT / 2hClub: D share), re-imp
   Not measured: the precision of the touch detector itself; the competition GT's switch convention
   (touch vs pass) is still unknown. The D share of BAR-ATH (36.4%) vs IDSSE gt (41.7%) is a
   property of the two matches / label sources, not evidence of a model bias.
+
+### 2026-11-15 - ft2 self-training (written BEFORE any result is seen)
+Idea: ft1 finds balls the COCO detector misses, so re-snapping ATD labels with ft1 keeps more
+(and harder) trustworthy labels than v2 (40.6% snapped). Labels stay 100% algorithmic: a label is
+kept only where the ATD ball and ft1 agree within 15 px.
+- Dataset v3: fresh sample, `dataset --out outputs/vball/dataset_v3 --n_train 24000 --n_val 2400
+  --gap 3 --seed 1`, then `refine --weights outputs/vball/ft1/best.pt --drop_unsnapped` (conf 0.03,
+  snap 15 px, box 1.0 m, all as v2). Train/val from the same disjoint minute blocks (`is_val`).
+- Label check before training: 30 random positive tiles of v3 (`check --zoom 4`, seed 0), human
+  eyeball. Continue only if >= 27/30 have the box on the ball; otherwise ft2 is dropped.
+- ft2 = YOLO11s from the COCO weights (not from ft1, to limit confirmation bias), same notebook
+  settings as ft1 except epochs 40 (2.5x more data): imgsz 640, batch 64, seed 0, deterministic.
+- Stage A: identical to ft1 (probe on val blocks, 40 segments x 15 frames, seed 0, imgsz 1920,
+  radius 2 m). tau = the lowest in {0.05, 0.1, 0.2, 0.3, 0.5, 0.7} with top-1 precision >= 70%.
+- Stage B: identical spec (fill = measured ATD-missing detection rate, prec = measured - 0.10,
+  err = measured, bursty false balls of 12). **ft2 replaces ft1 only if its Stage B spellF1 >=
+  0.7313 + 0.005 = 0.7363.** Otherwise ft1 / nn_ens23_vb1 stays.
+- If adopted: full fill `--tag ft2` (on Colab GPU only if a 48-frame smoke test is identical to
+  the M1 output after rounding, else on MPS), `make_submission ... --vball ft2 --name nn_ens23_vb2`,
+  then the same Smart Tagging sanity check vs nn_ens23 (BUILD UP / PROGRESSION not down > 2 points).
+- Cut-off: anything not passed by 16 Nov 23:00 WIB is not used. No other variants of ft2.
+- v3 built (19 min on M1): 26400 sampled frames, snapped to ft1 48.5% (v2 with COCO: 40.6%),
+  snap |shift| median 6.3 px. train 11688 pos / 5779 neg, val 1110 pos / 546 neg (v2: 6122 / 585).
+- **Label check: 30/30 boxes on the ball (>= 27 required) -> continue to training.**
+- ft2 trained on Colab (user), best.pt sha256 `ce0d1b40b2c865064bec8011e5ace155c01dd6e3cc78025ba63b5805aae9d777`.
+- **Stage A ft2: PASS but no better than ft1.** tau 0.05: top-1 precision 74.9% (ft1 74.4%),
+  recall 70.5% (68.4%), err 0.63 m (0.62), ATD-missing detection 53.5% (53.9%). Precision flat
+  over tau again (74.8-75.2%). Doubling the labels did not move the detector: the ceiling is
+  likely the ball itself (tiny, occluded, motion blur at 1920 px) or the ATD reference, not data.
+- **Stage B ft2: FAIL.** vball_f0.535_p0.649_e0.63_b12 -> 0.7225 < 0.7363 required (ft1: 0.7313).
+  -> **ft2 not adopted; ft1 / nn_ens23_vb1 stays.** Note: ft1 and ft2 have near-identical inputs
+  to the simulation yet differ by 0.009, so Stage B has ~0.01 simulation noise between nearby
+  settings (different random draws). ft1's margin over atd_like (+0.034) is well above it; a
+  ft1-vs-ft2 margin of 0.005 would not have been.
+- **Colab GPU fill is NOT reproducible against the M1** (ft1 weights, first 2000 gap frames,
+  Colab CUDA batch 32 vs M1 MPS batch 8): detections 1000 vs 981 (19 only on Colab, 0 only on M1),
+  xy identical on 61% of common frames (max 17 m), conf identical on 14% (max |d| 0.25). MPS vs
+  CPU was identical (48 frames). -> per the rule no Colab fill is used. For the repo: the fill must
+  be regenerated on CPU or Apple MPS; CUDA gives a different (similar-quality) ball file. Cause not
+  isolated (CUDA kernels / TF32, batch size, or video decode build).
+- **CPU vs MPS on the same 2000 gap frames (ft1, batch 8, tau 0.05): IDENTICAL** -- 981 vs 981
+  detections, xy and conf identical on 100% of them. CPU 2.4 fps (14 min for 2000; full match
+  ~7.5 h). -> Reproducibility claim for the repo: the video-ball fill is regenerated exactly on CPU
+  or Apple MPS with batch 8; not on CUDA.
+
+### 2026-11-16 - run5: PossessionNet trained with video-ball noise (written BEFORE training)
+Idea: the primary now feeds the model a ball that is 54% video detections in the ATD gaps, about a
+quarter of them wrong (often on a player, in bursts). run2/run3 never saw that kind of error in
+training. run5 sees it.
+- Code: `CorruptCfg.vball_p` (prob. per training window) applies `augment.vball_fill` (moved from
+  mtah.stress, unchanged) with random params from `augment.vball_params`: fill U(0.3, 0.8),
+  prec U(0.5, 0.95), err U(0.2, 1.0) m, burst 1 (30%) or U(5, 30) frames. Ranges are wide around
+  ft1's measured values, not tuned. vball_p = 0 draws no rng, so older configs are unchanged
+  (test). Stress after the move reproduces: atd_like 0.6970, vball ft1 scenario 0.7313.
+- Training (Colab, one run): `--rand mix --L 1500 --steps 300 --epochs 30 --batch 32 --vball_p 0.5`,
+  val idsse_J03WMX idsse_J03WR9, seed 0. Decoder tuned on its val probs like every model
+  (`mtah/tune_decoder.py`). No reruns or variants (resume after a disconnect is fine).
+- Evaluation: `mtah.stress` on the 8 scenarios + `vball_ft1` = atd_like + vball(0.539, 0.644,
+  0.62, burst 12), i.e. exactly ft1's Stage B spec. All models see identical inputs (paired).
+  Baseline = run2+run3 (primary model): vball_ft1 0.7313, atd_like 0.6970, mean of 8 0.7170.
+- Candidates: E = run2+run3+run5 (equal weights, run2's decoder); R = run5 alone (own decoder).
+- **Pass:** vball_ft1 >= baseline + 0.01 AND atd_like >= baseline - 0.005 AND mean of 8 >=
+  baseline - 0.005 AND base drop < 0.03. Among passing: highest vball_ft1; within 0.002 -> E.
+  The margin is 0.01 (not 0.005) because run5 is trained on the same family of simulated
+  detector errors it is judged on, so the simulation is optimistic for it.
+- Real-data sanity (BAR-ATH, no labels): Smart Tagging BUILD UP / PROGRESSION agreement must not
+  drop > 2 points vs nn_ens23_vb1 (92.9% / 85.0%).
+- If adopted: `make_submission --model <models> --vball ft1 --name nn_ens235_vb1` (or `nn_run5_vb1`).
+- Cut-off 16 Nov 23:00 WIB; otherwise nn_ens23_vb1 stays.
 
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.

@@ -37,6 +37,8 @@ class CorruptCfg:
     fov_burst: float = 150.0        # mean length of such a stretch, frames
     false_ball: float = 0.0         # fraction of frames with a false ball on a random player
     fragment: bool = False          # cut tracks into tracklets packed into reused slots
+    vball_p: float = 0.0            # prob. per sample of refilling ball gaps like the video ball
+                                    # detector would (vball_fill, params from vball_params)
     flip: bool = True
     team_swap: bool = True
     enabled: bool = True
@@ -124,6 +126,55 @@ def add_false_ball(ball_xy, players_xy, rng, rate, burst=12.0):
     return out
 
 
+def vball_fill(bxy, clean_bxy, pxy, rng, fill, prec, err, burst=1.0):
+    """Simulate refilling ball gaps with a video ball detector (Jalur 1).
+
+    Each frame where the corrupted ball is missing (and the clean ball exists) gets a detection with
+    prob `fill`; that detection is right with prob `prec` (clean ball + N(0, err) m) and otherwise
+    lands on a random visible player (+0.5 m noise) -- the worst place for possession. Frames are
+    independent, like a per-frame detector. Uses its own rng, so the underlying scenario is
+    unchanged.
+
+    burst > 1: wrong detections come in bursts (Markov, mean `burst` frames) that stay on ONE
+    player for the whole burst -- a persistent look-alike, much harder to average out.
+    """
+    bxy = bxy.copy()
+    gap = np.flatnonzero(np.isnan(bxy[:, 0]) & ~np.isnan(clean_bxy[:, 0]))
+    hit = gap[rng.random(len(gap)) < fill]
+    if burst <= 1:
+        right = rng.random(len(hit)) < prec
+        r = hit[right]
+        bxy[r] = clean_bxy[r] + rng.normal(0, err, (len(r), 2)).astype(np.float32)
+        for t in hit[~right]:
+            vis = np.flatnonzero(~np.isnan(pxy[t, :, 0]))
+            if len(vis):
+                bxy[t] = pxy[t, rng.choice(vis)] + rng.normal(0, 0.5, 2).astype(np.float32)
+        return bxy
+    T = len(bxy)
+    wrong = markov_missing(rng, T, 1, 1.0 - prec, burst)[:, 0]
+    is_hit = np.zeros(T, bool)
+    is_hit[hit] = True
+    r = np.flatnonzero(is_hit & ~wrong)
+    bxy[r] = clean_bxy[r] + rng.normal(0, err, (len(r), 2)).astype(np.float32)
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], wrong.astype(np.int8), [0]))))
+    for a, b in zip(edges[::2], edges[1::2]):
+        vis = np.flatnonzero(~np.isnan(pxy[a, :, 0]))
+        if not len(vis):
+            continue
+        s = rng.choice(vis)
+        off = rng.normal(0, 0.5, 2).astype(np.float32)
+        t = np.flatnonzero(is_hit[a:b]) + a
+        bxy[t] = pxy[t, s] + off           # NaN where that player is not tracked: no detection
+    return bxy
+
+
+def vball_params(rng):
+    """Random video-ball detector for training (run5, WORKLOG 2026-11-16). Ranges are wide around
+    what ft1 measured (fill 0.54, precision 0.74 vs a noisy reference, error 0.6 m); not tuned."""
+    return dict(fill=rng.uniform(0.3, 0.8), prec=rng.uniform(0.5, 0.95), err=rng.uniform(0.2, 1.0),
+                burst=1.0 if rng.random() < 0.3 else rng.uniform(5.0, 30.0))
+
+
 def fragment_tracks(players_xy, team, rng, mean_len=1500, wrong_team=0.03, dup=0.03):
     """Cut every track into tracklets and pack them into reused slots, ATD style.
 
@@ -168,6 +219,7 @@ def fragment_tracks(players_xy, team, rng, mean_len=1500, wrong_team=0.03, dup=0
 def corrupt(players_xy, team, ball_xy, label=None, rng=None, cfg=CorruptCfg(), ball_z=None):
     """Return corrupted copies (players_xy, team, ball_xy, label). Inputs are never modified."""
     rng = rng or np.random.default_rng()
+    clean_ball = ball_xy
     players_xy = players_xy.copy()
     ball_xy = ball_xy.copy()
     team = team.copy()
@@ -206,6 +258,10 @@ def corrupt(players_xy, team, ball_xy, label=None, rng=None, cfg=CorruptCfg(), b
         ball_xy = add_false_ball(ball_xy, players_xy, rng, cfg.false_ball)
     if cfg.fragment:
         players_xy, team = fragment_tracks(players_xy, team, rng)
+    # same place as in mtah.stress.scenario_inputs: after the tracking noise, before the flips.
+    # No rng is drawn when vball_p == 0, so older configs corrupt exactly as before.
+    if cfg.vball_p > 0 and rng.random() < cfg.vball_p:
+        ball_xy = vball_fill(ball_xy, clean_ball, players_xy, rng, **vball_params(rng))
 
     # geometry augmentations
     if cfg.flip:
