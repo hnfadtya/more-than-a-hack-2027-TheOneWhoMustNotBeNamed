@@ -40,8 +40,17 @@ hackathon.talentarena@mobileworldcapital.com (GitHub issues on the Metrica repo 
 - Training on the user's Colab A100 via `notebooks/colab_train.ipynb` (outputs on Google Drive
   `MyDrive/Metrica-Hackathon/mtah/outputs/<run>/`). Inference on BAR-ATH: local CPU, deterministic.
 
-## Current state (2026-11-16) -- experiments closed, deliverables only
-- **Primary: `nn_ens235_vb1`** = run2+run3+run5 (equal weights, run2's decoder) + video ball ft1.
+## Current state (2026-11-16) -- experiments CLOSED, deliverables only
+- **Primary (final): `nn_ens2356d_vb1`** = run2+run3+run5+run6 (equal weights) decoded with
+  `outputs/nn/ens235/decoder.json` (min 25/25/12, team 1, dead 0) + video ball ft1 (WORKLOG X1/X2).
+  `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 outputs/nn/run5 outputs/nn/run6 --decoder outputs/nn/ens235/decoder.json --vball ft1 --name nn_ens2356d_vb1`
+  -> sha256 `dc7264ec037c74e49cf2a3d65cae5ed5131912dd15a33be268b6206de8f06054`
+  (H 37.0 / A 24.9 / D 38.1%, 331 possessions). run6 = run5's command with `--seed 1`,
+  best.pt sha256 `5ed3c9c544d4de079ac67a52f6cf457e339458a218cbf57f0f4fdea6f8a5b14a`.
+  Release must ship: run2/3/5/6 best.pt, ens235/decoder.json, ft1 best.pt.
+- Previous: `nn_ens235d_vb1` = run2+run3+run5 with the same decoder, sha256
+  `515cabbbc7a0e8540fbeef8ef9953f138139fa77287adf34dcb4d87c99747150`.
+- Previous: `nn_ens235_vb1` = run2+run3+run5 (equal weights, run2's decoder) + video ball ft1.
   run5 = `--rand mix --L 1500 --steps 300 --vball_p 0.5` (trained with simulated video-ball errors),
   best.pt sha256 `31c75e5776afca1ebc9565f15ddae788f86456515c0632841b18a4439c7cbcff`. Passed the
   pre-registered rule + Smart Tagging sanity (WORKLOG 2026-11-16).

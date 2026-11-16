@@ -9,7 +9,7 @@ The ATD has all of these to some degree; a model whose score collapses under the
     python -m mtah.stress --models outputs/nn/run2 outputs/nn/run2+outputs/nn/run3   # ensemble
 
 A model spec "dirA+dirB" averages the models' probabilities (equal weights) and decodes with dirA's
-decoder.json. Per-model probabilities are cached in outputs/stress_cache/, keyed by the scenario
+decoder.json; "dirA+dirB@path/decoder.json" decodes with that decoder instead. Per-model probabilities are cached in outputs/stress_cache/, keyed by the scenario
 spec, so comparing ensembles does not recompute them.
 """
 
@@ -95,7 +95,7 @@ def cached_probs(model_dir, scenario, m, inp, seed=4321):
 
 
 def spec_probs(spec, scenario, m, inp):
-    dirs = spec.split("+")
+    dirs = spec.split("@")[0].split("+")
     return sum(cached_probs(d, scenario, m, inp).astype(np.float64) for d in dirs) / len(dirs)
 
 
@@ -121,7 +121,8 @@ def main():
             args.scenarios.append(name)
 
     ms = [m for m in load_matches("cache/idsse_*.npz", 25) if m.name in args.val]
-    decoders = {d: load_decoder(os.path.join(d.split("+")[0], "decoder.json")) for d in args.models}
+    decoders = {d: load_decoder(d.split("@")[1] if "@" in d else
+                                os.path.join(d.split("+")[0], "decoder.json")) for d in args.models}
     table = {}
     for name in args.scenarios:
         spec = SCENARIOS[name]

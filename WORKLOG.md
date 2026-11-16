@@ -390,6 +390,78 @@ training. run5 sees it.
   `d0c303216d6fa84ef17dd6eec0741e91c71f1ff47d82f3b0f48ecb0dc9b57e04`. Backup in `submissions_backup/`.
   Fallbacks: nn_ens23_vb1 (`ee60898c...`), nn_ens23 (`54711f56...`).
 - Experiments end here (last day, per the plan). Remaining time goes to the deliverables.
+  (Revised the same morning: two more cheap experiments below, same 23:00 WIB cut-off.)
+
+### 2026-11-16 - decoder for E, and run6 (written BEFORE either result is seen)
+Order: X1 is decided first; X2 is judged against whatever is primary after X1.
+- **X1, decoder for the ensemble.** E decodes with run2's decoder, never tuned on E's own probs.
+  Caveat found while preparing: each run's `val_probs.npz` comes from its own validation set
+  (run5's val corruption includes vball_p 0.5), so they cannot be averaged. Instead all three
+  models are run on CPU on run2/run3's validation set (`train.make_val_set`, default CorruptCfg,
+  seed 1234 -- the set every earlier decoder was tuned on); first check that run2's recomputed
+  probs give the same grid result as its stored val_probs. Grid = `mtah.tune_decoder` (400 configs)
+  on the averaged probs. D* = grid best (first of tied rows). If run2's config is within 0.005 of
+  D* on this grid: no change, X1 ends. Otherwise E' = E decoded with D*.
+- **X2, run6 = run5's exact command with `--seed 1`** (Colab, one run). F = run2+run3+run5+run6,
+  equal weights, decoded with the primary's decoder after X1. Its own decoder is not tuned.
+- **Pass (each, vs the primary at that moment, `mtah.stress` 8 scenarios + vball_ft1, paired):**
+  vball_ft1 up >= 0.005 AND mean of 8 not down AND atd_like down < 0.005 AND base down < 0.01.
+  (Mean of 8 must not fall: those scenarios have no simulated detector, so they are not
+  optimistic for models trained on it.) Then the Smart Tagging sanity: BUILD UP / PROGRESSION
+  not down > 2 points vs the current primary.
+- `mtah.stress` gets a `spec@decoder.json` form to decode an ensemble with a given decoder.
+- Cut-off 16 Nov 23:00 WIB. No other variants.
+
+- **X1 result.** Check: run2 recomputed on CPU vs its stored (Colab GPU) val probs: argmax agree
+  99.96%, max |dp| 0.019; grid best 0.7383 vs 0.7377, run2's config 0.7370 vs 0.7363 -> same val
+  set, OK. Ensemble grid (`outputs/nn/ens235/`): D* = min 25/25/12, team 1, dead 0 -> 0.7438;
+  run2's config 0.7368 (gap 0.0070 > 0.005) -> E' tested. Stress (`outputs/stress_x1.json`):
+
+  | scenario | E | E' |
+  |---|---|---|
+  | base | 0.7455 | 0.7565 |
+  | ball_heavy | 0.7114 | 0.7225 |
+  | players_heavy | 0.7467 | 0.7355 |
+  | false_ball | 0.7313 | 0.7377 |
+  | fragment | 0.7471 | 0.7523 |
+  | harsh | 0.6724 | 0.6785 |
+  | long_gaps | 0.7091 | 0.6988 |
+  | atd_like | 0.6927 | 0.6986 |
+  | mean of 8 | 0.7195 | 0.7226 |
+  | **vball_ft1** | 0.7432 | **0.7512** |
+
+  vball_ft1 +0.0080, mean of 8 +0.0031, atd_like +0.0059, base +0.0110 -> **PASS**.
+  Sanity vs nn_ens235_vb1: BUILD UP 92.3 -> 92.3%, PROGRESSION 85.2 -> 85.1%; all codes within
+  1 point -> **PASS**. 0.4% of graded frames change; possessions 305 -> 327 (mean 12.1 s; lower
+  switch costs keep more short spells).
+- `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 outputs/nn/run5 --decoder outputs/nn/ens235/decoder.json --vball ft1 --name nn_ens235d_vb1`
+  -> **Primary: `nn_ens235d_vb1.csv`**, sha256
+  `515cabbbc7a0e8540fbeef8ef9953f138139fa77287adf34dcb4d87c99747150`. X2 (run6) is judged against it.
+- **X2 result.** run6 (Colab, `--seed 1`, otherwise run5's command) best.pt sha256
+  `5ed3c9c544d4de079ac67a52f6cf457e339458a218cbf57f0f4fdea6f8a5b14a`, best val 0.7454 (30 epochs).
+  Stress (`outputs/stress_x2.json`), both decoded with `outputs/nn/ens235/decoder.json`:
+
+  | scenario | E' (run2+3+5) | F (run2+3+5+6) |
+  |---|---|---|
+  | base | 0.7565 | 0.7581 |
+  | ball_heavy | 0.7225 | 0.7253 |
+  | players_heavy | 0.7355 | 0.7417 |
+  | false_ball | 0.7377 | 0.7404 |
+  | fragment | 0.7523 | 0.7549 |
+  | harsh | 0.6785 | 0.6858 |
+  | long_gaps | 0.6988 | 0.7108 |
+  | atd_like | 0.6986 | 0.6990 |
+  | mean of 8 | 0.7226 | 0.7270 |
+  | **vball_ft1** | 0.7512 | **0.7582** |
+
+  F is better on all 9. vball_ft1 +0.0070, mean of 8 +0.0044, atd_like +0.0004, base +0.0016 ->
+  **PASS**. Sanity vs nn_ens235d_vb1: BUILD UP 92.3 -> 91.9%, PROGRESSION 85.1 -> 84.8%, all codes
+  within 1 point -> **PASS** (cumulative since nn_ens23_vb1: BUILD UP -1.0, PROGRESSION -0.2).
+  1.9% of graded frames change; H 37.0 / A 24.9 / D 38.1%, 331 possessions, mean 11.9 s.
+- `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 outputs/nn/run5 outputs/nn/run6 --decoder outputs/nn/ens235/decoder.json --vball ft1 --name nn_ens2356d_vb1`
+  -> **Primary: `nn_ens2356d_vb1.csv`**, sha256
+  `dc7264ec037c74e49cf2a3d65cae5ed5131912dd15a33be268b6206de8f06054`. Backup in `submissions_backup/`.
+- **Experiments closed** (16 Nov 14:20 WIB). Not re-tuning the decoder for F: not pre-registered.
 
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.
