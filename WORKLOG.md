@@ -355,6 +355,41 @@ training. run5 sees it.
   drop > 2 points vs nn_ens23_vb1 (92.9% / 85.0%).
 - If adopted: `make_submission --model <models> --vball ft1 --name nn_ens235_vb1` (or `nn_run5_vb1`).
 - Cut-off 16 Nov 23:00 WIB; otherwise nn_ens23_vb1 stays.
+- Decoder of R (written before running the grid): run2's config (min 25/25/50, team 8, dead 2)
+  if its val spellF1 on run5's grid is within 0.005 of the grid best (as for run3); otherwise the
+  grid best. E always uses run2's decoder.
+- First Colab attempt failed before training (notebook cloned the old repo; REPO fixed). The
+  run that counts: run5 best.pt sha256 `31c75e5776afca1ebc9565f15ddae788f86456515c0632841b18a4439c7cbcff`,
+  30 epochs x ~64 s, best val spellF1 0.7273 (default decoder, in-training).
+- Decoder grid on run5 val probs: best 0.7476 (min 25/25/12, team 0, dead 0; a tie of 6 rows,
+  first taken); run2's config 0.7363 = 0.0113 below -> R uses the grid best (rule above).
+- Stress (`outputs/stress_run5.json`, 18 min CPU), baseline run2+run3 / E run2+run3+run5 / R run5:
+
+  | scenario | run2+run3 | E | R |
+  |---|---|---|---|
+  | base | 0.7447 | 0.7455 | 0.7296 |
+  | ball_heavy | 0.7133 | 0.7114 | 0.6978 |
+  | players_heavy | 0.7351 | 0.7467 | 0.7313 |
+  | false_ball | 0.7331 | 0.7313 | 0.7130 |
+  | fragment | 0.7460 | 0.7471 | 0.7167 |
+  | harsh | 0.6641 | 0.6724 | 0.6620 |
+  | long_gaps | 0.7027 | 0.7091 | 0.6786 |
+  | atd_like | 0.6970 | 0.6927 | 0.6816 |
+  | mean of 8 | 0.7170 | 0.7195 | 0.7013 |
+  | **vball_ft1** | 0.7313 | **0.7432** | 0.7547 |
+
+  E: vball_ft1 +0.0119 (>= 0.01), atd_like -0.0043 (>= -0.005, close to the limit), mean of 8
+  +0.0025, base +0.0008 -> **PASS**. R: vball_ft1 +0.0234 but atd_like -0.0154 -> FAIL (a
+  vball specialist, like run3 was a long-gap specialist).
+- **Sanity (Smart Tagging vs nn_ens23_vb1): PASS.** BUILD UP 92.9 -> 92.3% (-0.6), PROGRESSION
+  85.0 -> 85.2% (+0.2). Other codes within 1.7 points; the shift is mostly to D, not to the other
+  team. 2.3% of graded frames change label.
+- `python -m mtah.make_submission --model outputs/nn/run2 outputs/nn/run3 outputs/nn/run5 --vball ft1 --name nn_ens235_vb1`
+  -> graded H 36.8 / A 25.5 / D 37.7%, 305 possessions, mean 13.0 s, home share 0.59.
+- -> **Primary submission: `nn_ens235_vb1.csv`**, sha256
+  `d0c303216d6fa84ef17dd6eec0741e91c71f1ff47d82f3b0f48ecb0dc9b57e04`. Backup in `submissions_backup/`.
+  Fallbacks: nn_ens23_vb1 (`ee60898c...`), nn_ens23 (`54711f56...`).
+- Experiments end here (last day, per the plan). Remaining time goes to the deliverables.
 
 ## Next
 - [ ] When data lands: `python -m mtah.atd` stats -> calibrate CorruptCfg; first submissions.
