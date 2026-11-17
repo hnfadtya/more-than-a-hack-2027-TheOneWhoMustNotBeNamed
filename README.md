@@ -1,3 +1,98 @@
+# The One Who Must Not Be Named — More than a Hack 2027, Phase 1 submission
+
+This repository regenerates our possession file for BAR-ATH, `The One Who Must Not Be Named.csv`.
+How it works, what we tried and dropped, the training data and the limitations are in the technical
+document, [docs/technical_report.pdf](docs/technical_report.pdf). The day-by-day log with every
+validation number and the decision rules written before each result is [WORKLOG.md](WORKLOG.md).
+
+In short: `PossessionNet` (set transformer + temporal convolutions + BiGRU, `mtah/model.py`) is
+trained only on the open IDSSE matches (Bassek et al., CC BY 4.0), corrupted to look like the
+competition's automatic tracking. Four trained networks are averaged and decoded with a Viterbi
+decoder with minimum durations (`mtah/decode.py`). Ball gaps in the tracking are first filled by a
+YOLO11s ball detector run on the tactical video (`mtah/vball.py`). No human label on BAR-ATH is
+used anywhere.
+
+The submitted file has this SHA-256:
+
+```
+dc7264ec037c74e49cf2a3d65cae5ed5131912dd15a33be268b6206de8f06054
+```
+
+## Reproduce the submission
+
+1. **Environment.** Python 3.12.3.
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate          # Windows: .venv\Scripts\activate
+   pip install -r requirements-mtah.txt
+   # CPU-only torch, if wanted: pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+   ```
+
+2. **Match data.** Unpack the organisers' bundle into `data/` exactly as described in
+   [data/README.md](data/README.md). The tactical video `data/tactical/BAR-ATH_tactical.mp4` is
+   needed. The data is not in this repository and must not be.
+
+3. **Weights.** `outputs/` is not committed. The four networks, the decoder settings and the ball
+   detector are assets of the [v1.0 release](https://github.com/hnfadtya/more-than-a-hack-2027-TheOneWhoMustNotBeNamed/releases/tag/v1.0).
+   This downloads them to the paths the pipeline reads and checks each SHA-256:
+
+   ```bash
+   python -m mtah.get_weights
+   ```
+
+   | release asset | goes to |
+   |---|---|
+   | `run2_best.pt`, `run3_best.pt`, `run5_best.pt`, `run6_best.pt` | `outputs/nn/run{2,3,5,6}/best.pt` |
+   | `ens235_decoder.json` | `outputs/nn/ens235/decoder.json` |
+   | `vball_ft1_best.pt` | `outputs/vball/ft1/best.pt` |
+
+4. **Video ball.** Detect the ball on every graded frame where the tracking has none. This writes
+   `cache/BAR-ATH_vball_ft1.npz`.
+
+   ```bash
+   python -m mtah.vball fill --tag ft1 --device mps   # Apple silicon, about 2.7 h
+   python -m mtah.vball fill --tag ft1 --device cpu   # any machine, about 7.5 h
+   ```
+
+   CPU and Apple MPS give identical detections (batch 8, the default). **Do not run this step on a
+   CUDA GPU**: the detections differ slightly and so does the final file.
+
+5. **Possession file.** This runs on CPU and is deterministic.
+
+   ```bash
+   python -m mtah.make_submission \
+       --model outputs/nn/run2 outputs/nn/run3 outputs/nn/run5 outputs/nn/run6 \
+       --decoder outputs/nn/ens235/decoder.json \
+       --vball ft1 --name nn_ens2356d_vb1
+   ```
+
+   It writes `evaluation/results/nn_ens2356d_vb1.csv` and prints the class shares
+   (H 37.0% / A 24.9% / D 38.1% of graded frames, 331 possessions). The score it prints on the
+   public five minutes is only a pipeline check.
+
+6. **Name and check.**
+
+   ```bash
+   cp evaluation/results/nn_ens2356d_vb1.csv "The One Who Must Not Be Named.csv"
+   python evaluation/validate_submission.py "The One Who Must Not Be Named.csv"
+   shasum -a 256 "The One Who Must Not Be Named.csv"     # Windows: certutil -hashfile "The One Who Must Not Be Named.csv" SHA256
+   ```
+
+   The hash must be the one above.
+
+Unit tests: `python -m pytest tests -q`.
+
+**Training (not needed to reproduce).** IDSSE download and conversion are described in
+[external/README.md](external/README.md). The networks were trained on a Colab A100 with
+[notebooks/colab_train.ipynb](notebooks/colab_train.ipynb) and the ball detector with
+[notebooks/colab_vball.ipynb](notebooks/colab_vball.ipynb). The exact command of every run is in
+WORKLOG.md.
+
+---
+
+*The organisers' original README follows.*
+
 # More than a Hack 2027 — Phase 1: Ball Possession
 
 **Organised by [Metrica Sports](https://metrica-sports.com), [FC Barcelona](https://www.fcbarcelona.com)
