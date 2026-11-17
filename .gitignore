@@ -49,6 +49,10 @@ data/*
 # tree, and this repository is public.
 *.pdf
 
+# ...with one deliberate exception: our own technical report is a required deliverable and ships
+# with the repo, next to the .docx source it was exported from.
+!docs/technical_report.pdf
+
 # Organiser tooling lives in ../mtah2027-organizers, outside this repository. This line is
 # insurance against it being recreated in here by habit.
 organizers/
